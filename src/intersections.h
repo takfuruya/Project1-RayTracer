@@ -12,6 +12,8 @@
 #include "utilities.h"
 #include <thrust/random.h>
 
+#include <stdlib.h>
+
 //Some forward declarations
 __host__ __device__ glm::vec3 getPointOnRay(ray r, float t);
 __host__ __device__ glm::vec3 multiplyMV(cudaMat4 m, glm::vec4 v);
@@ -68,11 +70,80 @@ __host__ __device__ glm::vec3 getSignOfRay(ray r){
   return glm::vec3((int)(inv_direction.x < 0), (int)(inv_direction.y < 0), (int)(inv_direction.z < 0));
 }
 
-//TODO: IMPLEMENT THIS FUNCTION
-//Cube intersection test, return -1 if no intersection, otherwise, distance to intersection
-__host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal){
+// HW TODO: IMPLEMENT THIS FUNCTION
+// Cube intersection test, return -1 if no intersection, otherwise, distance to intersection
+__host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& intersectionPoint, glm::vec3& normal)
+{
+  // Convert ray from World to object coordinate system (unit cube centered at 0,0,0)
+  ray rt;
+  rt.origin = multiplyMV(box.inverseTransform, glm::vec4(r.origin,1.0f));
+  rt.direction = glm::normalize(multiplyMV(box.inverseTransform, glm::vec4(r.direction,0.0f)));
 
-    return -1;
+	// Compute ray-box intersection distance.
+	// Implementation from http://www.siggraph.org/education/materials/HyperGraph/raytrace/rtinter3.htm
+
+  float t;                // Distance from ray origin to intersection point in object's coods
+  float t_far = 1.0e30f;  // TODO: change to FLT_MAX or std::numeric_limits<float>::max()
+  float t_near = -t_far;
+
+  float origin[] = {rt.origin.x, rt.origin.y, rt.origin.z};
+  float direction[] = {rt.direction.x, rt.direction.y, rt.direction.z};
+  for (int i=0; i<3; ++i)
+  {
+    // Compute the intersection distance of the planes
+    float t1 = (-0.5f - origin[i]) / direction[i];
+    float t2 = (0.5f - origin[i]) / direction[i];
+
+    // Swap t1 and t2 such that t1 < t2
+    if (t1 > t2)
+    {
+      float temp = t2;
+      t2 = t1;
+      t1 = temp;
+    }
+
+    if (t1 > t_near) t_near = t1;
+    if (t2 < t_far) t_far = t2;
+    if (t_near > t_far || t_far < 0.0f) return -1.0f;
+  }
+
+  t = ((t_near < 0.0f) ? t_far : t_near);
+
+  // Compute normal (in object coordinate system)
+  glm::vec3 hit_point(rt.origin + rt.direction * t);
+  if (abs(hit_point.x - 0.5f) < EPSILON)
+  {
+    normal = glm::vec3(1.0f, 0.0f, 0.0f);
+  }
+  else if (abs(hit_point.x + 0.5f) < EPSILON)
+  {
+    normal = glm::vec3(-1.0f, 0.0f, 0.0f);
+  }
+  else if (abs(hit_point.y - 0.5f) < EPSILON)
+  {
+    normal = glm::vec3(0.0f, 1.0f, 0.0f);
+  }
+  else if (abs(hit_point.y + 0.5f) < EPSILON)
+  {
+    normal = glm::vec3(0.0f, -1.0f, 0.0f);
+  }
+  else if (abs(hit_point.z - 0.5f) < EPSILON)
+  {
+    normal = glm::vec3(0.0f, 0.0f, 1.0f);
+  }
+  else
+  {
+    normal = glm::vec3(0.0f, 0.0f, -1.0f);
+  }
+
+  // Convert back to world coordinate system
+  glm::vec3 realIntersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(rt, t), 1.0f));
+  glm::vec3 realNormal = multiplyMV(box.transform, glm::vec4(normal, 1.0f));
+
+  intersectionPoint = realIntersectionPoint;
+  normal = glm::normalize(realNormal);
+  
+  return glm::length(r.origin - realIntersectionPoint);
 }
 
 //LOOK: Here's an intersection test example from a sphere. Now you just need to figure out cube and, optionally, triangle.
