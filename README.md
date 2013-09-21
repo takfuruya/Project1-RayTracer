@@ -14,6 +14,14 @@ Additional features:
 * Soft shadows 
 * Interactive camera (arrow keys to navigate in YZ plane)
 
+
+
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
+
+
 Note:
 Soft shadows is noisy since the number of samples is 1. By increasing this, the
 shadows would appear more soft on every frame but this is not possible on Moore 100
