@@ -7,274 +7,259 @@
 
 #include "main.h"
 
-//-------------------------------
-//-------------MAIN--------------
-//-------------------------------
+using namespace std;
 
-int main(int argc, char** argv){
 
-  #ifdef __APPLE__
-	  // Needed in OSX to force use of OpenGL3.2 
-	  glfwOpenWindowHint(GLFW_OPENGL_VERSION_MAJOR, 3);
-	  glfwOpenWindowHint(GLFW_OPENGL_VERSION_MINOR, 2);
-	  glfwOpenWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-	  glfwOpenWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-  #endif
+// ============================================
+// ================== Main ====================
+// ============================================
 
-  // Set up pathtracer stuff
-  bool loadedScene = false;
-  finishedRender = false;
+int main(int argc, char** argv)
+{
+	// Set up pathtracer
+	bool is_scene_loaded	= false;
+	is_render_done			= false;
+	target_frame			= 0;
+	is_single_frame_mode	= false;
 
-  targetFrame = 0;
-  singleFrameMode = false;
 
-  // Load scene file
-  for(int i=1; i<argc; i++){
-    string header; string data;
-    istringstream liness(argv[i]);
-    getline(liness, header, '='); getline(liness, data, '=');
-    if(strcmp(header.c_str(), "scene")==0){
-      renderScene = new scene(data);
-      loadedScene = true;
-    }else if(strcmp(header.c_str(), "frame")==0){
-      targetFrame = atoi(data.c_str());
-      singleFrameMode = true;
-    }
-  }
-
-  if(!loadedScene){
-    cout << "Error: scene file needed!" << endl;
-    return 0;
-  }
-
-  // Set up camera stuff from loaded pathtracer settings
-  iterations = 0;
-  renderCam = &renderScene->renderCam;
-  width = renderCam->resolution[0];
-  height = renderCam->resolution[1];
-
-  if(targetFrame>=renderCam->frames){
-    cout << "Warning: Specified target frame is out of range, defaulting to frame 0." << endl;
-    targetFrame = 0;
-  }
-
-  // Launch CUDA/GL
-
-  #ifdef __APPLE__
-	init();
-  #else
-	init(argc, argv);
-  #endif
-
-  initCuda();
-
-  initVAO();
-  initTextures();
-
-  GLuint passthroughProgram;
-  passthroughProgram = initShader("shaders/passthroughVS.glsl", "shaders/passthroughFS.glsl");
-
-  glUseProgram(passthroughProgram);
-  glActiveTexture(GL_TEXTURE0);
-
-  #ifdef __APPLE__
-	  // send into GLFW main loop
-	  while(1){
-		display();
-		if (glfwGetKey(GLFW_KEY_ESC) == GLFW_PRESS || !glfwGetWindowParam( GLFW_OPENED )){
-				exit(0);
-		}
-	  }
-
-	  glfwTerminate();
-  #else
-	  glutDisplayFunc(display);
-	  glutKeyboardFunc(keyboard);
-
-	  glutMainLoop();
-  #endif
-  return 0;
-}
-
-//-------------------------------
-//---------RUNTIME STUFF---------
-//-------------------------------
-
-void runCuda(){
-
-  // Map OpenGL buffer object for writing from CUDA on a single GPU
-  // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
-  
-  if(iterations<renderCam->iterations){
-    uchar4 *dptr=NULL;
-    iterations++;
-    cudaGLMapBufferObject((void**)&dptr, pbo);
-  
-    //pack geom and material arrays
-    geom* geoms = new geom[renderScene->objects.size()];
-    material* materials = new material[renderScene->materials.size()];
-    
-    for(int i=0; i<renderScene->objects.size(); i++){
-      geoms[i] = renderScene->objects[i];
-    }
-    for(int i=0; i<renderScene->materials.size(); i++){
-      materials[i] = renderScene->materials[i];
-    }
-    
-  
-    // execute the kernel
-    cudaRaytraceCore(dptr, renderCam, targetFrame, iterations, materials, renderScene->materials.size(), geoms, renderScene->objects.size() );
-    
-    // unmap buffer object
-    cudaGLUnmapBufferObject(pbo);
-  }else{
-
-    if(!finishedRender){
-      //output image file
-      image outputImage(renderCam->resolution.x, renderCam->resolution.y);
-
-      for(int x=0; x<renderCam->resolution.x; x++){
-        for(int y=0; y<renderCam->resolution.y; y++){
-          int index = x + (y * renderCam->resolution.x);
-          outputImage.writePixelRGB(renderCam->resolution.x-1-x,y,renderCam->image[index]);
-        }
-      }
-      
-      gammaSettings gamma;
-      gamma.applyGamma = true;
-      gamma.gamma = 1.0/2.2;
-      gamma.divisor = renderCam->iterations;
-      outputImage.setGammaSettings(gamma);
-      string filename = renderCam->imageName;
-      string s;
-      stringstream out;
-      out << targetFrame;
-      s = out.str();
-      utilityCore::replaceString(filename, ".bmp", "."+s+".bmp");
-      utilityCore::replaceString(filename, ".png", "."+s+".png");
-      outputImage.saveImageRGB(filename);
-      cout << "Saved frame " << s << " to " << filename << endl;
-      finishedRender = true;
-      if(singleFrameMode==true){
-        cudaDeviceReset(); 
-        exit(0);
-      }
-    }
-    if(targetFrame<renderCam->frames-1){
-
-      //clear image buffer and move onto next frame
-      targetFrame++;
-      iterations = 0;
-      for(int i=0; i<renderCam->resolution.x*renderCam->resolution.y; i++){
-        renderCam->image[i] = glm::vec3(0,0,0);
-      }
-      cudaDeviceReset(); 
-      finishedRender = false;
-    }
-  }
-  
-}
-
-#ifdef __APPLE__
-
-	void display(){
-		runCuda();
-
-		string title = "CIS565 Render | " + utilityCore::convertIntToString(iterations) + " Iterations";
-		glfwSetWindowTitle(title.c_str());
-
-		glBindBuffer( GL_PIXEL_UNPACK_BUFFER, pbo);
-		glBindTexture(GL_TEXTURE_2D, displayImage);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, 
-			  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-
-		glClear(GL_COLOR_BUFFER_BIT);   
-
-		// VAO, shader program, and texture already bound
-		glDrawElements(GL_TRIANGLES, 6,  GL_UNSIGNED_SHORT, 0);
-
-		glfwSwapBuffers();
-	}
-
-#else
-
-	void display(){
-		runCuda();
-
-		string title = "565Raytracer | " + utilityCore::convertIntToString(iterations) + " Iterations";
-		glutSetWindowTitle(title.c_str());
-
-		glBindBuffer( GL_PIXEL_UNPACK_BUFFER, pbo);
-		glBindTexture(GL_TEXTURE_2D, displayImage);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, 
-			  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-
-		glClear(GL_COLOR_BUFFER_BIT);   
-
-		// VAO, shader program, and texture already bound
-		glDrawElements(GL_TRIANGLES, 6,  GL_UNSIGNED_SHORT, 0);
-
-		glutPostRedisplay();
-		glutSwapBuffers();
-	}
-
-	void keyboard(unsigned char key, int x, int y)
+	// Read command line arguments and load scene file.
+	for ( int i=1; i<argc; ++i )
 	{
-		std::cout << key << std::endl;
-		switch (key) 
+		// header=data (e.g. scene=my_scene.txt)
+		string header, data;
+		istringstream liness(argv[i]);
+		getline(liness, header, '=');
+		getline(liness, data, '=');
+
+		if ( strcmp(header.c_str(), "scene") == 0 )
 		{
-		   case(27):
-			   exit(1);
-			   break;
+			render_scene = new scene(data);
+			is_scene_loaded = true;
 		}
-	}
-
-#endif
-
-
-
-
-//-------------------------------
-//----------SETUP STUFF----------
-//-------------------------------
-
-#ifdef __APPLE__
-	void init(){
-
-		if (glfwInit() != GL_TRUE){
-			shut_down(1);      
-		}
-
-		// 16 bit color, no depth, alpha or stencil buffers, windowed
-		if (glfwOpenWindow(width, height, 5, 6, 5, 0, 0, 0, GLFW_WINDOW) != GL_TRUE){
-			shut_down(1);
-		}
-
-		// Set up vertex array object, texture stuff
-		initVAO();
-		initTextures();
-	}
-#else
-	void init(int argc, char* argv[]){
-		glutInit(&argc, argv);
-		glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-		glutInitWindowSize(width, height);
-		glutCreateWindow("565Raytracer");
-
-		// Init GLEW
-		glewInit();
-		GLenum err = glewInit();
-		if (GLEW_OK != err)
+		else if ( strcmp(header.c_str(), "frame") == 0 )
 		{
-			/* Problem: glewInit failed, something is seriously wrong. */
-			std::cout << "glewInit failed, aborting." << std::endl;
-			exit (1);
+			target_frame = atoi(data.c_str());
+			is_single_frame_mode = true;
+		}
+	}
+
+	if ( !is_scene_loaded )
+	{
+		cout << "Error: scene file needed!" << endl;
+		return 0;
+	}
+
+
+	// Set up camera from loaded pathtracer settings.
+	iterations = 0;
+	cam = &(render_scene->renderCam);
+	width = cam->resolution[0];
+	height = cam->resolution[1];
+
+	if ( target_frame >= cam->frames )
+	{
+		cout << "Warning: Specified target frame is out of range, defaulting to frame 0." << endl;
+		target_frame = 0;
+	}
+
+
+	// Launch CUDA/GL
+
+	Init(argc, argv); // Initialize GLUT & GLEW
+
+	initCuda();
+
+
+	GLuint passthroughProgram;
+	passthroughProgram = initShader("shaders/passthroughVS.glsl", "shaders/passthroughFS.glsl");
+
+	glUseProgram(passthroughProgram);
+	glActiveTexture(GL_TEXTURE0);
+
+	glutDisplayFunc(display);
+	glutKeyboardFunc(keyboard);
+	glutSpecialFunc(SpecialInput);
+
+	glutMainLoop();
+
+	return 0;
+}
+
+
+// ============================================
+// =============== Runtime ====================
+// ============================================
+
+
+// GLUT display callback.
+void display()
+{
+	runCuda();
+
+	string title = "565Raytracer | " + utilityCore::convertIntToString(iterations) + " Iterations";
+	glutSetWindowTitle(title.c_str());
+
+	glBindBuffer( GL_PIXEL_UNPACK_BUFFER, pbo);
+	glBindTexture(GL_TEXTURE_2D, displayImage);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, 
+			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glClear(GL_COLOR_BUFFER_BIT);   
+
+	// VAO, shader program, and texture already bound
+	glDrawElements(GL_TRIANGLES, 6,  GL_UNSIGNED_SHORT, 0);
+
+	glutPostRedisplay();
+	glutSwapBuffers();
+}
+
+
+void runCuda()
+{
+	// Map OpenGL buffer object for writing from CUDA on a single GPU
+	// No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer.
+	
+	if ( iterations < cam->iterations )
+	{
+		uchar4 *dptr = NULL;
+		++ iterations;
+		cudaGLMapBufferObject((void**)&dptr, pbo);
+
+		// Pack geom and material arrays.
+		geom* geoms = new geom[render_scene->objects.size()];
+		material* materials = new material[render_scene->materials.size()];
+
+		for ( int i=0; i < render_scene->objects.size(); ++i )
+		{
+			geoms[i] = render_scene->objects[i];
+		}
+		for ( int i=0; i<render_scene->materials.size(); ++i )
+		{
+			materials[i] = render_scene->materials[i];
 		}
 
-		initVAO();
-		initTextures();
+		// Execute kernel.
+		cudaRaytraceCore(dptr, cam, target_frame, iterations, materials, render_scene->materials.size(), geoms, render_scene->objects.size() );
+		
+		cudaGLUnmapBufferObject(pbo);
+		return;
 	}
-#endif
+
+	if( !is_render_done )
+	{
+		// Output image file.
+		image outputImage(cam->resolution.x, cam->resolution.y);
+
+		for(int x=0; x<cam->resolution.x; x++)
+		{
+			for(int y=0; y<cam->resolution.y; y++)
+			{
+				int index = x + (y * cam->resolution.x);
+				outputImage.writePixelRGB(cam->resolution.x-1-x,y,cam->image[index]);
+			}
+		}
+      
+		gammaSettings gamma;
+		gamma.applyGamma = true;
+		gamma.gamma = 1.0/2.2;
+		gamma.divisor = 1.0f;//cam->iterations;
+		outputImage.setGammaSettings(gamma);
+		string filename = cam->imageName;
+		string s;
+		stringstream out;
+		out << target_frame;
+		s = out.str();
+		utilityCore::replaceString(filename, ".bmp", "."+s+".bmp");
+		utilityCore::replaceString(filename, ".png", "."+s+".png");
+		//outputImage.saveImageRGB(filename);
+		//cout << "Saved frame " << s << " to " << filename << endl;
+		is_render_done = true;
+		if(is_single_frame_mode==true)
+		{
+			cudaDeviceReset(); 
+			exit(0);
+		}
+	}
+
+	if ( target_frame < cam->frames-1 )
+	{
+		//clear image buffer and move onto next frame
+		target_frame++;
+		iterations = 0;
+		for ( int i=0; i<cam->resolution.x*cam->resolution.y; ++i )
+		{
+			cam->image[i] = glm::vec3(0,0,0);
+		}
+		cudaDeviceReset(); 
+		is_render_done = false;
+	}
+}
+
+
+const unsigned char KEY_ESC = 27;
+const unsigned char KEY_W = 'w';
+
+void keyboard(unsigned char key, int x, int y)
+{
+	switch (key) 
+	{
+		case KEY_ESC:
+			exit(1);
+			break;
+	}
+}
+
+void SpecialInput(int key, int x, int y)
+{
+	glm::vec3 increment(0.0f);
+
+	switch(key)
+	{
+		case GLUT_KEY_UP:
+			increment.z = -0.1f;
+			break;
+		case GLUT_KEY_DOWN:
+			increment.z = 0.1f;
+			break;
+		case GLUT_KEY_LEFT:
+			increment.x = -0.1f;
+			break;
+		case GLUT_KEY_RIGHT:
+			increment.x = 0.1f;
+			break;
+	}
+	*(cam->positions) = *(cam->positions) + increment;
+}
+
+
+
+
+// ============================================
+// Initialize GLUT & GLEW =====================
+// ============================================
+
+void Init(int argc, char* argv[])
+{
+	// Initialize GLUT.
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
+	glutInitWindowSize(width, height);
+	glutCreateWindow("565Raytracer");
+
+	// Initialize GLEW.
+	glewInit();
+	GLenum err = glewInit();
+	if (GLEW_OK != err)
+	{
+		cout << "glewInit failed, aborting." << endl;
+		exit(1);
+	}
+
+	initVAO();
+	initTextures();
+}
+
 
 void initPBO(GLuint* pbo){
   if (pbo) {
@@ -302,7 +287,7 @@ void initCuda(){
   // Clean up on program exit
   atexit(cleanupCuda);
 
-  runCuda();
+  //runCuda();
 }
 
 void initTextures(){
@@ -391,8 +376,5 @@ void deleteTexture(GLuint* tex){
 }
  
 void shut_down(int return_code){
-  #ifdef __APPLE__
-	glfwTerminate();
-  #endif
   exit(return_code);
 }

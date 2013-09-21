@@ -10,8 +10,8 @@
 #include "cudaMat4.h"
 #include "glm/glm.hpp"
 #include "utilities.h"
+#include "float.h"
 #include <thrust/random.h>
-
 #include <stdlib.h>
 
 //Some forward declarations
@@ -83,7 +83,7 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 	// Implementation from http://www.siggraph.org/education/materials/HyperGraph/raytrace/rtinter3.htm
 
   float t;                // Distance from ray origin to intersection point in object's coods
-  float t_far = 1.0e30f;  // TODO: change to FLT_MAX or std::numeric_limits<float>::max()
+  float t_far = FLT_MAX;
   float t_near = -t_far;
 
   float origin[] = {rt.origin.x, rt.origin.y, rt.origin.z};
@@ -111,23 +111,24 @@ __host__ __device__ float boxIntersectionTest(staticGeom box, ray r, glm::vec3& 
 
   // Compute normal (in object coordinate system)
   glm::vec3 hit_point(rt.origin + rt.direction * t);
-  if (abs(hit_point.x - 0.5f) < EPSILON)
+  float EPS = 0.0001f; // EPSILON in utilities.h results in noise (too small)
+  if (abs(hit_point.x - 0.5f) < EPS)
   {
     normal = glm::vec3(1.0f, 0.0f, 0.0f);
   }
-  else if (abs(hit_point.x + 0.5f) < EPSILON)
+  else if (abs(hit_point.x + 0.5f) < EPS)
   {
     normal = glm::vec3(-1.0f, 0.0f, 0.0f);
   }
-  else if (abs(hit_point.y - 0.5f) < EPSILON)
+  else if (abs(hit_point.y - 0.5f) < EPS)
   {
     normal = glm::vec3(0.0f, 1.0f, 0.0f);
   }
-  else if (abs(hit_point.y + 0.5f) < EPSILON)
+  else if (abs(hit_point.y + 0.5f) < EPS)
   {
     normal = glm::vec3(0.0f, -1.0f, 0.0f);
   }
-  else if (abs(hit_point.z - 0.5f) < EPSILON)
+  else if (abs(hit_point.z - 0.5f) < EPS)
   {
     normal = glm::vec3(0.0f, 0.0f, 1.0f);
   }
@@ -244,11 +245,32 @@ __host__ __device__ glm::vec3 getRandomPointOnCube(staticGeom cube, float random
        
 }
 
-//TODO: IMPLEMENT THIS FUNCTION
-//Generates a random point on a given sphere
-__host__ __device__ glm::vec3 getRandomPointOnSphere(staticGeom sphere, float randomSeed){
+// HW TODO: IMPLEMENT THIS FUNCTION
+// Generates a random point on a given sphere
+__host__ __device__ glm::vec3 getRandomPointOnSphere(staticGeom sphere, float randomSeed)
+{
+  thrust::default_random_engine rng(hash(randomSeed));
+  thrust::uniform_real_distribution<float> u01(0.0f, 1.0f);
 
-  return glm::vec3(0,0,0);
+  // Sphere point picking:
+  // http://mathworld.wolfram.com/SpherePointPicking.html
+  
+  float u = (float) u01(rng);
+  float v = (float) u01(rng);
+
+  float theta = TWO_PI * u;
+  float phi = acos( 2.0f * v - 1.0f );
+  
+  // Convert from spherical to Cartesian coordinates.
+  float r = 0.5f; // Radius
+  float x = r * sin(phi) * cos(theta);
+  float y = r * sin(phi) * sin(theta);
+  float z = r * cos(phi);
+
+  // Convert to World coordinate system.
+  glm::vec3 randPoint = multiplyMV(sphere.transform, glm::vec4(x, y, z, 1.0f));
+  
+  return randPoint;
 }
 
 #endif

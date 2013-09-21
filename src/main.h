@@ -8,12 +8,9 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-#ifdef __APPLE__
-	#include <GL/glfw.h>
-#else
-	#include <GL/glew.h>
-	#include <GL/glut.h>
-#endif
+
+#include <GL/glew.h>
+#include <GL/glut.h>
 
 #include <stdlib.h>
 #include <cuda_runtime.h>
@@ -46,12 +43,12 @@ using namespace std;
 //----------PATHTRACER-----------
 //-------------------------------
 
-scene* renderScene;
-camera* renderCam;
-int targetFrame;
+scene* render_scene;
+camera* cam;
+int target_frame;
 int iterations;
-bool finishedRender;
-bool singleFrameMode;
+bool is_render_done;
+bool is_single_frame_mode;
 
 //-------------------------------
 //------------GL STUFF-----------
@@ -67,7 +64,7 @@ GLuint displayImage;
 //----------CUDA STUFF-----------
 //-------------------------------
 
-int width=800; int height=800;
+int width, height;
 
 //-------------------------------
 //-------------MAIN--------------
@@ -81,22 +78,15 @@ int main(int argc, char** argv);
 
 void runCuda();
 
-#ifdef __APPLE__
-	void display();
-#else
-	void display();
-	void keyboard(unsigned char key, int x, int y);
-#endif
+void display();
+void keyboard(unsigned char key, int x, int y);
+void SpecialInput(int key, int x, int y);
 
 //-------------------------------
 //----------SETUP STUFF----------
 //-------------------------------
 
-#ifdef __APPLE__
-	void init();
-#else
-	void init(int argc, char* argv[]);
-#endif
+void Init(int argc, char* argv[]);
 
 void initPBO(GLuint* pbo);
 void initCuda();

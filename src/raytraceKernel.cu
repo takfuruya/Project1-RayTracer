@@ -15,6 +15,7 @@
 #include "intersections.h"
 #include "interactions.h"
 #include <vector>
+#include <time.h>
 
 #if CUDA_VERSION >= 5000
     #include <helper_math.h>
@@ -127,6 +128,51 @@ __global__ void sendImageToPBO(uchar4* PBOpos, glm::vec2 resolution, glm::vec3* 
   }
 }
 
+__device__ glm::vec3 reflect(glm::vec3 const & I, glm::vec3 const & N)
+{
+  return I - 2.0f * glm::dot(N, I) * N;
+}
+
+__device__ bool isRayUnblocked(glm::vec3 const & point1, glm::vec3 const & point2, staticGeom* geoms, int numberOfGeoms)
+{
+  glm::vec3 DIRECTION(point2 - point1);
+  float DISTANCE = glm::length(DIRECTION);
+
+  // Offset start position in ray direction by small distance to prevent self collisions
+  float DELTA = 0.001f;
+  ray r;
+  r.origin = point1 + DELTA * DIRECTION;
+  r.direction = glm::normalize(DIRECTION);
+
+  for (int i=0; i<numberOfGeoms; ++i)
+  {
+    float intersectionDistance;
+    glm::vec3 intersectionPoint;
+    glm::vec3 normal;
+
+    switch (geoms[i].type)
+    {
+      case SPHERE:
+        intersectionDistance = sphereIntersectionTest(geoms[i], r, intersectionPoint, normal);
+        break;
+      case CUBE:
+        intersectionDistance = boxIntersectionTest(geoms[i], r, intersectionPoint, normal);
+        break;
+      case MESH:
+        intersectionDistance = -1.0f;
+        break;
+    }
+
+	  // Does not intersect so check next primitive
+	  if (intersectionDistance <= 0.0f) continue;
+
+    // Take into consideration intersection only between the two points.
+	  if (intersectionDistance < DISTANCE) return false;
+  }
+
+  return true;
+}
+
 // HW TODO: IMPLEMENT THIS FUNCTION
 // Core raytracer kernel (Assumes geometry material index is valid)
 __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, int rayDepth, glm::vec3* colors,
@@ -172,7 +218,7 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
       distance = newDistance;
       intersection = newIntersection;
       normal = newNormal;
-      materialIdx = i;
+      materialIdx = geoms[i].materialid;
     }
   }
   
@@ -193,20 +239,26 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
   float transmittance = 1.0f - reflectivity;
   glm::vec3 materialColor = materials[materialIdx].color;
 	glm::vec3 reflectedColor(0.0f, 0.0f, 0.0f);
-  glm::vec3 ambientLightColor(0.0f, 0.0f, 0.0f);
-  glm::vec3 lightPosition(0.5f, 1.0f, -0.5f);
+  glm::vec3 ambientLightColor(1.0f, 1.0f, 1.0f);
+  
+  
 
-	float AMBIENT_WEIGHT = 0.2f;	// Ka - Ambient reflectivity factor
-	float DIFFUSE_WEIGHT = 0.3f;	// Kd - Diffuse reflectivity factor
-	float SPECULAR_WEIGHT = 0.5f;	// Ks - Specular reflectivity factor
+  float AMBIENT_WEIGHT = 0.2f;	// Ka - Ambient reflectivity factor
+  float DIFFUSE_WEIGHT = 0.3f;	// Kd - Diffuse reflectivity factor
+  float SPECULAR_WEIGHT = 0.5f;	// Ks - Specular reflectivity factor
 
-  glm::vec3 lightColor(0.0f, 0.0f, 0.0f);
+  glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
   glm::vec3 color = AMBIENT_WEIGHT * ambientLightColor * materialColor;
+
+  thrust::default_random_engine rng(hash(index*time));
+  thrust::uniform_real_distribution<float> u01(-0.15f, 0.15f);
+  for ( int i = 0; i < 1; ++i)
   {
+	glm::vec3 lightPosition(0.5f + (float) u01(rng), 0.75f, -0.5f  + (float) u01(rng));
     // Unit vector from intersection point to light source
     glm::vec3 LIGHT_DIRECTION = glm::normalize(lightPosition - intersection);
     // Direction of reflected light at intersection point
-    //glm::vec3 LIGHT_REFLECTION = glm::normalize(glm::reflect(-1.0f*LIGHT_DIRECTION, normal));
+    glm::vec3 LIGHT_REFLECTION = glm::normalize(reflect(-1.0f*LIGHT_DIRECTION, normal));
 
     // Determine diffuse term
     float diffuseTerm;
@@ -214,35 +266,38 @@ __global__ void raytraceRay(glm::vec2 resolution, float time, cameraData cam, in
     diffuseTerm = glm::clamp(diffuseTerm, 0.0f, 1.0f);
 
     // Determine specular term
-    float specularTerm;
-    /*
+    float specularTerm = 0.0f;
+    if ( materials[materialIdx].specularExponent - 0.0f > 0.001f )
     {
-      const float SPECULAR_EXPONENT = intersectedPrimitive->material()->specularExponent;
-      const vec3 EYE_DIRECTION = glm::normalize(eyePosition - intersection);
+      float SPECULAR_EXPONENT = materials[materialIdx].specularExponent;
+      glm::vec3 EYE_DIRECTION = glm::normalize(cam.position - intersection);
       specularTerm = glm::dot(LIGHT_REFLECTION, EYE_DIRECTION);
-      specularTerm = pow(std::max(specularTerm, 0.0f), SPECULAR_EXPONENT);
+      specularTerm = pow(fmaxf(specularTerm, 0.0f), SPECULAR_EXPONENT);
       specularTerm = glm::clamp(specularTerm, 0.0f, 1.0f);
     }
-    */
+    
 
-    //if (isRayUnblocked(intersection, lightPosition))
-    //{
-    //  color += DIFFUSE_WEIGHT * lightColor * materialColor * diffuseTerm;
-    //  color += SPECULAR_WEIGHT * lightColor * specularTerm;
-    //}
+    if (isRayUnblocked(intersection, lightPosition, geoms, numberOfGeoms))
+    {
+      color += DIFFUSE_WEIGHT * lightColor * materialColor * diffuseTerm / 1.0f;
+      color += SPECULAR_WEIGHT * lightColor * specularTerm / 1.0f;
+    }
   }
   
   colors[index] = reflectivity*reflectedColor + transmittance*color;
 }
 
+
+
 // HW TODO: FINISH THIS FUNCTION
 // Wrapper for the __global__ call that sets up the kernel calls and does a ton of memory management
 void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iterations, material* materials, int numberOfMaterials, geom* geoms, int numberOfGeoms){
-  
+  clock_t time1, time2;
+  time1 = clock();
   int traceDepth = 1; //determines how many bounces the raytracer traces
 
   // set up crucial magic
-  int tileSize = 8;
+  int tileSize = 16;
   dim3 threadsPerBlock(tileSize, tileSize);
   dim3 fullBlocksPerGrid((int)ceil(float(renderCam->resolution.x)/float(tileSize)), (int)ceil(float(renderCam->resolution.y)/float(tileSize)));
   
@@ -299,4 +354,8 @@ void cudaRaytraceCore(uchar4* PBOpos, camera* renderCam, int frame, int iteratio
   cudaThreadSynchronize();
 
   checkCUDAError("Kernel failed!");
+
+  time2 = clock();
+  float execution_time = ((float) (time2 - time1)) / CLOCKS_PER_SEC;
+  printf ("Execution time: %f\n", execution_time);
 }
