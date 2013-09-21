@@ -15,11 +15,32 @@ Additional features:
 * Interactive camera (arrow keys to navigate in YZ plane)
 
 
+Camera view:
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
 
-![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
-![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
-![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
-![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/1.png)
+Cube intersection
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/2.png)
+
+Cube normals check
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/3.png)
+
+Send material to GPU
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/4.png)
+
+Diffuse and ambient
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/5.png)
+
+Diffuse and ambient (fixed)
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/6.png)
+
+Specular
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/7.png)
+
+Shadow
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/8.png)
+
+Soft shadow
+![](https://raw.github.com/takfuruya/Project1-RayTracer/master/screenshots/9.png)
 
 
 Note:
