@@ -56,12 +56,14 @@ Performance Evaluation
 I tested on different block sizes by changing the tileSize parameter in 
 cudaRaytraceCore(). This adjusts the number of threads per block.
 
+```
 tileSize	Execution time (sec/frame)
 4x4			Display driver error
 7x7			OS shut down
 8x8			1.386
 16x16		1.663
 32x32		Cuda did not compile
+```
 
 This test was done with 800 x 800 resolution output.
 Looking at the specs on Moore 100 pc, it is compute capability 1.1 so has warp size of 32 with 
